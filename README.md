@@ -25,7 +25,7 @@ This Python script automates the process of converting JPG, JPEG, and PNG images
    ```
    git clone https://github.com/RenX86/WebP-Image-Converter.git
    ```
-   or download `Images-ConvertToWebp.py` and `run-webp-converter.bat` directly.
+   or download `WebP-Image-Converter.py` and `run-webp-converter.bat` directly.
 
 2. Install the required Python libraries:
    ```
@@ -68,7 +68,7 @@ This Python script automates the process of converting JPG, JPEG, and PNG images
 2. Navigate to the script directory.
 3. Run the Python script directly:
    ```
-   python Images-ConvertToWebp.py
+   python WebP-Image-Converter.py
    ```
 4. Enter the path to the folder containing your images when prompted.
 
