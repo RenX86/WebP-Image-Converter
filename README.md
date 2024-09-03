@@ -39,8 +39,8 @@ This Python script automates the process of converting JPG, JPEG, and PNG images
 
 4. Install ExifTool: 
    - For Windows: Download from [ExifTool website](https://exiftool.org/) and add to your PATH.
-      In windows rename the 'exiftool(-k).exe' to 'exiftool.exe' after extraction.
-      Add the whole extrated folder to PATH in environment variables.
+      - In windows rename the 'exiftool(-k).exe' to 'exiftool.exe' after extraction.
+      - Add the whole extrated folder to PATH in environment variables.
    - For macOS: Use Homebrew: `brew install exiftool`
    - For Linux: Use your distribution's package manager, e.g., `sudo apt-get install libimage-exiftool-perl`
 
