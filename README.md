@@ -74,7 +74,7 @@ This Python script automates the process of converting JPG, JPEG, and PNG images
 
 ## Configuration
 
-You can modify the following variables at the top of `Images-ConvertToWebp.py` to customize the script's behavior:
+You can modify the following variables at the top of `WebP-Image-Converter.py` to customize the script's behavior:
 
 - `WEBP_QUALITY`: Set the quality of the WebP conversion (0-100)
 - `DELETE_ORIGINALS`: Set to `True` to delete original files after conversion, `False` to keep them
