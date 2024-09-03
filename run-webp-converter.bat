@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 :: Set the path to your Python script
-set "SCRIPT_PATH=%~dp0Webp_Image_Converter.py"
+set "SCRIPT_PATH=%~dp0WebP-Image-Converter.py"
 
 :: Check if Python is installed and in PATH
 where python >nul 2>nul
