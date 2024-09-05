@@ -63,6 +63,7 @@ This Python script automates the process of converting JPG, JPEG, and PNG images
    run-webp-converter
    ```
 4. Enter the path to the folder containing your images when prompted.
+5. No need enter the path in " " format justy directly paste the path and proceed.
 
 ### On macOS and Linux:
 
