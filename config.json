@@ -1,0 +1,17 @@
+{
+    "webp_quality": "100",
+    "delete_originals": true,
+    "supported_formats": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".tiff",
+        ".bmp",
+        ".gif"
+    ],
+    "max_workers": 12,
+    "tool_paths": {
+        "cwebp": "cwebp",
+        "exiftool": "exiftool"
+    }
+}

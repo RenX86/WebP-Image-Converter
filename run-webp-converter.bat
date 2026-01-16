@@ -13,8 +13,11 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: Run the Python script
+:: Run the Python script in a loop
+:loop
 python "%SCRIPT_PATH%"
-
-:: Pause to see any output
-pause
+echo.
+echo Script finished. Restarting...
+echo Press Ctrl+C to exit.
+echo.
+goto loop
