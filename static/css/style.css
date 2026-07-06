@@ -296,6 +296,51 @@ input[type=range]::-webkit-slider-thumb:hover {
 .glow-on-hover:disabled:after { background: #444; }
 
 
+/* Progress Bar */
+.progress-section {
+    background: #0a0a0f;
+    padding: 15px 20px;
+    border-radius: 12px;
+    border: 1px solid var(--glass-border);
+    margin-bottom: -15px;
+}
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+#progress-file {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 80%;
+    text-align: right;
+    direction: rtl; /* Truncates start of path */
+}
+#progress-text {
+    font-weight: 800;
+    color: var(--secondary);
+    min-width: 45px;
+}
+.progress-bar-bg {
+    width: 100%;
+    height: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--secondary), var(--primary));
+    border-radius: 6px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 10px var(--primary-glow);
+}
+
 /* Terminal Output */
 .terminal {
     background: #0a0a0f;

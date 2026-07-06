@@ -46,6 +46,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 appendLog(log, type);
             });
 
+            if (data.status === 'running' || data.status === 'completed') {
+                document.getElementById('progress-container').style.display = 'block';
+                document.getElementById('progress-text').textContent = `${data.progress || 0}%`;
+                document.getElementById('progress-fill').style.width = `${data.progress || 0}%`;
+                
+                if (data.current_file) {
+                    let text = data.current_file;
+                    if (data.status === 'completed') text = 'Conversion finished successfully!';
+                    document.getElementById('progress-file').textContent = text;
+                    document.getElementById('progress-file').title = text;
+                }
+            }
+
             if (data.status === 'completed' || data.status === 'error') {
                 clearInterval(pollInterval);
                 startBtn.disabled = false;
