@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebP Converter Premium</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Fira+Code&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="background">
+        <!-- We'll use the generated background image -->
+        <div class="bg-image"></div>
+        <div class="bg-overlay"></div>
+    </div>
+
+    <main class="container glass">
+        <header>
+            <h1 class="gradient-text">WebP Converter</h1>
+            <p>Optimize your image batches seamlessly</p>
+        </header>
+
+        <section class="controls">
+            <div class="input-group">
+                <label for="folder-path">Target Folder Path</label>
+                <input type="text" id="folder-path" placeholder="C:\Users\Name\Pictures\Batch" autocomplete="off">
+            </div>
+
+            <div class="sliders-row">
+                <div class="input-group range-group">
+                    <label for="quality">Quality (<span id="quality-val">100</span>%)</label>
+                    <input type="range" id="quality" min="1" max="100" value="100">
+                </div>
+                
+                <div class="input-group range-group">
+                    <label for="workers">Workers (<span id="workers-val">4</span>)</label>
+                    <input type="range" id="workers" min="1" max="32" value="4">
+                </div>
+            </div>
+
+            <div class="checkbox-group">
+                <label class="custom-checkbox">
+                    <input type="checkbox" id="keep-originals">
+                    <span class="checkmark"></span>
+                    Keep Original Files
+                </label>
+            </div>
+
+            <button id="start-btn" class="glow-on-hover">Start Conversion</button>
+        </section>
+
+        <section class="terminal">
+            <div class="terminal-header">
+                <div class="dots">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                </div>
+                <div class="title">Process Output</div>
+            </div>
+            <div class="terminal-body" id="logs">
+                <div class="log-entry system">Ready to process.</div>
+            </div>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

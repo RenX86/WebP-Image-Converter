@@ -11,7 +11,7 @@
     ],
     "max_workers": 12,
     "tool_paths": {
-        "cwebp": "cwebp",
-        "exiftool": "exiftool"
+        "cwebp": "bin/cwebp.exe",
+        "exiftool": "bin/exiftool.exe"
     }
 }
