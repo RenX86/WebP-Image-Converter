@@ -33,7 +33,8 @@ except ImportError:
         def update(self, n: int = 1) -> None:
             self.count += n
             if self.total:
-                print(f"\r{self.desc}: {self.count}/{self.total}", end='', flush=True)
+                pct = int(100 * self.count / self.total)
+                print(f"\r{self.desc}: {pct:3d}%|  {self.count}/{self.total}", end='', flush=True)
             else:
                 print(f"\r{self.desc}: {self.count}", end='', flush=True)
 
@@ -264,23 +265,40 @@ def process_image_file(file_path: str) -> None:
             user_comment = ""
             creation_time = ""
             software = ""
+            comfyui_prompt = ""
+            comfyui_workflow = ""
             
             try:
                 with Image.open(filename) as im:
                     # Extract metadata without keeping the image in memory unnecessarily
+                    # A1111-style metadata
                     user_comment = im.info.get("parameters", "")
                     creation_time = im.info.get("creation_time", "")
                     software = im.info.get("software", "")
+                    # ComfyUI / Fooocus metadata
+                    comfyui_prompt = im.info.get("prompt", "")
+                    comfyui_workflow = im.info.get("workflow", "")
             except Exception as img_err:
                  logging.warning(f"Could not read metadata from {filename}: {img_err}")
 
             # Write EXIF to WEBP
-            if user_comment or creation_time or software:
+            if user_comment or creation_time or software or comfyui_prompt or comfyui_workflow:
                 # Build args list
                 exiftool_args = exiftool_base_args.copy()
 
+                # Combine all generation metadata into UserComment
+                # A1111 parameters take priority, then ComfyUI prompt/workflow
+                combined_comment_parts = []
                 if user_comment:
-                    exiftool_args.append(f'-UserComment={user_comment}')
+                    combined_comment_parts.append(user_comment)
+                if comfyui_prompt:
+                    combined_comment_parts.append(f"[ComfyUI Prompt]\n{comfyui_prompt}")
+                if comfyui_workflow:
+                    combined_comment_parts.append(f"[ComfyUI Workflow]\n{comfyui_workflow}")
+                
+                if combined_comment_parts:
+                    combined_comment = "\n\n".join(combined_comment_parts)
+                    exiftool_args.append(f'-UserComment={combined_comment}')
                 if creation_time:
                     exiftool_args.append(f'-DateTimeOriginal={creation_time}')
                 if software:
@@ -441,6 +459,14 @@ def main() -> None:
     config_tool_paths = config.get("tool_paths", {})
     if config_tool_paths:
         TOOL_PATHS.update(config_tool_paths)
+    
+    # Resolve relative tool paths against the script's directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    for tool_key, tool_path in TOOL_PATHS.items():
+        if not os.path.isabs(tool_path) and os.path.dirname(tool_path):
+            resolved = os.path.join(script_dir, tool_path)
+            if os.path.exists(resolved):
+                TOOL_PATHS[tool_key] = resolved
 
     # Check if external tools are available
     if not check_external_tools():
