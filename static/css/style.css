@@ -173,6 +173,9 @@ input[type=range]::-webkit-slider-thumb:hover {
 /* Custom Checkbox */
 .checkbox-group {
     margin-top: 5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
 }
 
 .custom-checkbox {
@@ -402,7 +405,14 @@ input[type=range]::-webkit-slider-thumb:hover {
     border-radius: 3px;
 }
 
-.log-entry { margin-bottom: 4px; }
+.log-entry { margin-bottom: 4px; white-space: pre-wrap; word-break: break-all; }
 .log-entry.system { color: #56b6c2; }
 .log-entry.error { color: #e06c75; }
+.log-entry.warning { color: #e5c07b; }
 .log-entry.success { color: #98c379; }
+
+.progress-section.has-errors .progress-bar-fill {
+    background: linear-gradient(90deg, #e5c07b, #e06c75);
+}
+
+.range-group.disabled { opacity: 0.4; }

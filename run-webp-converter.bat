@@ -13,11 +13,15 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: Run the Python script in a loop
+:: Run the Python script in a loop (extra arguments are passed through, e.g. --delete-originals)
 :loop
-python "%SCRIPT_PATH%"
+python "%SCRIPT_PATH%" %*
 echo.
-echo Script finished. Restarting...
-echo Press Ctrl+C to exit.
+if %errorlevel% equ 1 echo Finished with errors - some files failed or were skipped. Check the log above.
+if %errorlevel% geq 2 echo Conversion did not run - see the error above.
+echo.
+set "CHOICE="
+set /p "CHOICE=Press Enter to convert another folder, or type Q to quit: "
+if /i "!CHOICE!"=="q" exit /b 0
 echo.
 goto loop
