@@ -1,8 +1,10 @@
 {
-    "webp_quality": 100,
-    "delete_originals": false,
+    "webp_quality": 90,
     "lossless": false,
+    "method": 4,
+    "delete_originals": false,
     "overwrite": false,
+    "recursive": true,
     "supported_formats": [
         ".jpg",
         ".jpeg",
@@ -12,10 +14,5 @@
         ".bmp",
         ".gif"
     ],
-    "max_workers": 12,
-    "tool_paths": {
-        "cwebp": "bin/cwebp.exe",
-        "exiftool": "bin/exiftool.exe",
-        "gif2webp": "gif2webp"
-    }
+    "max_workers": 8
 }

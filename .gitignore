@@ -1,15 +1,12 @@
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
 .venv/
 venv/
 .pytest_cache/
 
 # Logs
 *.log
-
-# ExifTool's Perl modules MUST be committed. A global "lib/" ignore rule
-# (common in ~/.gitignore_global) would otherwise silently drop them and
-# break the bundled exiftool.exe on fresh clones.
-!bin/exiftool_files/lib/
-!bin/exiftool_files/lib/**

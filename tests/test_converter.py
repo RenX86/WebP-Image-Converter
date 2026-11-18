@@ -1,51 +1,36 @@
+import io
 import os
 import subprocess
 import sys
+import threading
 
 import pytest
-from PIL import Image, PngImagePlugin
+from PIL import Image, ImageCms, PngImagePlugin
 
-A1111_PARAMS = (
-    "masterpiece, a cat in a hat, 日本語 ✓\n"
-    "Negative prompt: ugly, blurry\n"
-    "Steps: 20, Sampler: Euler a, CFG scale: 7, Seed: 1234, Size: 512x512"
+from webp_converter.cli import build_parser, build_settings
+from webp_converter.config import Settings
+from webp_converter.core import (
+    BatchEvent,
+    convert_file,
+    plan_conversions,
+    run_batch,
+    scan_folder,
+    to_exif_datetime,
 )
-COMFY_PROMPT = '{"3": {"class_type": "KSampler", "inputs": {"seed": 1}}}'
-COMFY_WORKFLOW = '{"nodes": [{"id": 3, "type": "KSampler"}],\n "links": []}'
-
-
-def make_png(path, **text):
-    info = PngImagePlugin.PngInfo()
-    for k, v in text.items():
-        info.add_text(k, v, zip=len(v) > 50)
-    Image.new("RGB", (16, 16), "red").save(path, pnginfo=info)
-
-
-def read_tag(tools, path, tag):
-    # Go through the script's args-file helper: exiftool can't take non-ASCII paths on the Windows command line
-    conv = sys.modules["webp_converter"]
-    stdout, _ = conv.run_exiftool(tools["exiftool"], ["-b", f"-{tag}", path])
-    return stdout
-
-
-def settings(conv, tools, **kw):
-    s = conv.Settings(**kw)
-    s.tools = tools
-    return s
 
 
 # ---------------------------------------------------------------- planning
 
-def test_plan_simple(conv, tmp_path):
+def test_plan_simple(tmp_path):
     a = str(tmp_path / "a.png")
     open(a, "wb").close()
-    plan, skipped = conv.plan_conversions([a])
+    plan, skipped = plan_conversions([a])
     assert plan == [(a, str(tmp_path / "a.webp"))] and skipped == []
 
 
-def test_plan_same_stem_gets_distinct_names(conv, tmp_path):
+def test_plan_same_stem_gets_distinct_names(tmp_path):
     jpg, png = str(tmp_path / "photo.jpg"), str(tmp_path / "photo.png")
-    plan, skipped = conv.plan_conversions([jpg, png])
+    plan, skipped = plan_conversions([jpg, png])
     outputs = dict(plan)
     assert outputs[jpg].endswith("photo_jpg.webp")
     assert outputs[png].endswith("photo_png.webp")
@@ -53,48 +38,52 @@ def test_plan_same_stem_gets_distinct_names(conv, tmp_path):
 
 
 @pytest.mark.skipif(not sys.platform.startswith("win"), reason="case-insensitive filesystem")
-def test_plan_case_insensitive_collision(conv, tmp_path):
+def test_plan_case_insensitive_collision(tmp_path):
     a, b = str(tmp_path / "Photo.jpg"), str(tmp_path / "photo.PNG")
-    plan, _ = conv.plan_conversions([a, b])
+    plan, _ = plan_conversions([a, b])
     assert len({os.path.normcase(d) for _, d in plan}) == 2
 
 
-def test_plan_never_overwrites_existing_webp(conv, tmp_path):
+def test_plan_never_overwrites_existing_webp(tmp_path):
     (tmp_path / "a.webp").write_bytes(b"existing")
     a = str(tmp_path / "a.png")
-    plan, _ = conv.plan_conversions([a])
+    plan, _ = plan_conversions([a])
     assert plan == [(a, str(tmp_path / "a_png.webp"))]
-    plan, _ = conv.plan_conversions([a], overwrite=True)
+    plan, _ = plan_conversions([a], overwrite=True)
     assert plan == [(a, str(tmp_path / "a.webp"))]
 
 
-def test_plan_skips_when_all_names_taken(conv, tmp_path):
+def test_plan_skips_when_all_names_taken(tmp_path):
     (tmp_path / "a.webp").write_bytes(b"x")
     (tmp_path / "a_png.webp").write_bytes(b"x")
     a = str(tmp_path / "a.png")
-    plan, skipped = conv.plan_conversions([a])
+    plan, skipped = plan_conversions([a])
     assert plan == [] and skipped == [a]
 
 
-# ---------------------------------------------------------------- config / CLI
+# ---------------------------------------------------------------- scanning & config
 
-def test_cli_overrides_config(conv):
-    parser = conv.build_parser()
-    cfg = {"webp_quality": "80", "delete_originals": True, "max_workers": 3, "lossless": True}
-    s = conv.build_settings(parser.parse_args(["x"]), cfg)
-    assert (s.quality, s.delete_originals, s.max_workers, s.lossless) == (80, True, 3, True)
-    s = conv.build_settings(parser.parse_args(["x", "--keep-originals", "--lossy", "-q", "50"]), cfg)
-    assert (s.quality, s.delete_originals, s.lossless) == (50, False, False)
+def test_scan_non_recursive(tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    Image.new("RGB", (8, 8)).save(tmp_path / "top.png")
+    Image.new("RGB", (8, 8)).save(sub / "nested.png")
+    assert len(scan_folder(str(tmp_path), {".png"}, recursive=True)) == 2
+    assert len(scan_folder(str(tmp_path), {".png"}, recursive=False)) == 1
 
 
-def test_default_keeps_originals(conv):
-    s = conv.build_settings(conv.build_parser().parse_args(["x"]), {})
+def test_cli_overrides_config():
+    parser = build_parser()
+    cfg = {"webp_quality": "80", "delete_originals": True, "max_workers": 3, "lossless": True, "method": 6}
+    s = build_settings(parser.parse_args(["x"]), cfg)
+    assert (s.quality, s.delete_originals, s.max_workers, s.lossless, s.method) == (80, True, 3, True, 6)
+    s = build_settings(parser.parse_args(["x", "--keep-originals", "--lossy", "-q", "50", "-m", "2"]), cfg)
+    assert (s.quality, s.delete_originals, s.lossless, s.method) == (50, False, False, 2)
+
+
+def test_default_keeps_originals():
+    s = build_settings(build_parser().parse_args(["x"]), {})
     assert s.delete_originals is False
-
-
-def test_formats_normalised(conv):
-    s = conv.build_settings(conv.build_parser().parse_args(["x", "--formats", "PNG", ".Jpg"]), {})
-    assert s.supported_formats == {".png", ".jpg"}
 
 
 @pytest.mark.parametrize("value,expected", [
@@ -103,95 +92,142 @@ def test_formats_normalised(conv):
     ("2023:05:01 10:20:30", "2023:05:01 10:20:30"),
     ("not a date", None),
 ])
-def test_to_exif_datetime(conv, value, expected):
-    assert conv.to_exif_datetime(value) == expected
+def test_to_exif_datetime(value, expected):
+    assert to_exif_datetime(value) == expected
 
 
-# ---------------------------------------------------------------- integration (needs cwebp + exiftool)
+# ---------------------------------------------------------------- conversion & metadata
 
-def test_a1111_multiline_parameters_roundtrip(conv, tools, tmp_path):
-    src = str(tmp_path / "gen.png")
-    make_png(src, parameters=A1111_PARAMS)
-    dst = str(tmp_path / "gen.webp")
-    assert conv.process_image_file(settings(conv, tools), src, dst)
-    assert read_tag(tools, dst, "UserComment") == A1111_PARAMS
-    assert os.path.exists(src), "originals must be kept by default"
-
-
-def test_comfyui_metadata_in_comfy_format(conv, tools, tmp_path):
-    src = str(tmp_path / "comfy.png")
-    make_png(src, prompt=COMFY_PROMPT, workflow=COMFY_WORKFLOW)
-    dst = str(tmp_path / "comfy.webp")
-    assert conv.process_image_file(settings(conv, tools), src, dst)
-    assert read_tag(tools, dst, "Make") == "workflow:" + COMFY_WORKFLOW
-    assert read_tag(tools, dst, "Model") == "prompt:" + COMFY_PROMPT
-
-
-def test_jpeg_exif_copied_and_original_deleted(conv, tools, tmp_path):
+def test_jpeg_exif_and_icc_preserved_and_unicode_path(tmp_path):
     src = str(tmp_path / "ünïcode photo.jpg")
-    Image.new("RGB", (16, 16), "blue").save(src)
-    conv.run_exiftool(tools["exiftool"], ["-overwrite_original", "-Artist=Tester", src])
+    im = Image.new("RGB", (16, 16), "blue")
+    exif = im.getexif()
+    exif[0x013B] = "Tester"
+    exif[0x010E] = "Sample description"
+    srgb = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    im.save(src, exif=exif, icc_profile=srgb)
+
     dst = str(tmp_path / "ünïcode photo.webp")
-    assert conv.process_image_file(settings(conv, tools, delete_originals=True), src, dst)
-    assert read_tag(tools, dst, "Artist") == "Tester"
+    ok, before, after, err = convert_file(Settings(delete_originals=True), src, dst)
+    assert ok and err == "" and before > 0 and after > 0
     assert not os.path.exists(src)
+    with Image.open(dst) as out:
+        assert out.getexif().get(0x013B) == "Tester"
+        assert out.getexif().get(0x010E) == "Sample description"
+        assert out.info.get("icc_profile") == srgb
 
 
-def test_failed_encode_keeps_original_and_no_partial_output(conv, tools, tmp_path):
+def test_exif_orientation_applied_on_convert(tmp_path):
+    src = str(tmp_path / "rotated.jpg")
+    im = Image.new("RGB", (20, 10), "red")
+    exif = im.getexif()
+    exif[0x0112] = 6  # Rotate 90 CW -> should become 10x20 upright
+    im.save(src, exif=exif)
+
+    dst = str(tmp_path / "rotated.webp")
+    ok, _, _, _ = convert_file(Settings(), src, dst)
+    assert ok
+    with Image.open(dst) as out:
+        assert out.size == (10, 20)
+        assert out.getexif().get(0x0112) in (None, 1)
+
+
+def test_png_xmp_and_generic_text_preserved(tmp_path):
+    src = str(tmp_path / "meta.png")
+    info = PngImagePlugin.PngInfo()
+    info.add_text("Author", "Alice")
+    info.add_text("Comment", "Multi-line\ncomment ✓")
+    info.add_text("XML:com.adobe.xmp", "<x:xmpmeta>hello</x:xmpmeta>")
+    Image.new("RGB", (16, 16), "green").save(src, pnginfo=info)
+
+    dst = str(tmp_path / "meta.webp")
+    ok, _, _, _ = convert_file(Settings(), src, dst)
+    assert ok
+    with Image.open(dst) as out:
+        assert out.getexif().get(0x013B) == "Alice"
+        assert b"hello" in (out.info.get("xmp") or b"")
+        uc = out.getexif().get_ifd(0x8769).get(0x9286, b"")
+        assert b"Multi-line" in uc or "Multi-line".encode("utf-16-be") in uc
+
+
+def test_failed_encode_keeps_original_and_no_partial_output(tmp_path):
     src = str(tmp_path / "broken.png")
     with open(src, "wb") as f:
         f.write(b"not really a png")
     dst = str(tmp_path / "broken.webp")
-    assert not conv.process_image_file(settings(conv, tools, delete_originals=True), src, dst)
+    ok, _, _, err = convert_file(Settings(delete_originals=True), src, dst)
+    assert not ok and err
     assert os.path.exists(src)
     assert not os.path.exists(dst)
 
 
-def test_lossless_is_pixel_exact(conv, tools, tmp_path):
+def test_lossless_is_pixel_exact(tmp_path):
     src = str(tmp_path / "px.png")
-    img = Image.new("RGB", (8, 8))
-    img.putdata([(i * 4, 255 - i * 4, (i * 37) % 256) for i in range(64)])
+    img = Image.new("RGBA", (8, 8))
+    img.putdata([(i * 4, 255 - i * 4, (i * 37) % 256, 0 if i % 2 == 0 else 180) for i in range(64)])
     img.save(src)
     dst = str(tmp_path / "px.webp")
-    assert conv.process_image_file(settings(conv, tools, lossless=True), src, dst)
+    ok, _, _, _ = convert_file(Settings(lossless=True), src, dst)
+    assert ok
     with Image.open(dst) as out:
-        assert out.convert("RGB").tobytes() == img.tobytes()
+        assert out.convert("RGBA").tobytes() == img.tobytes()
 
 
-def test_cli_exit_codes_and_collision_end_to_end(tools, tmp_path):
+@pytest.mark.parametrize("ext", [".bmp", ".gif", ".tif"])
+def test_static_formats_convert(tmp_path, ext):
+    src = str(tmp_path / f"img{ext}")
+    Image.new("RGB", (16, 16), "green").save(src)
+    dst = str(tmp_path / "img.webp")
+    ok, _, _, _ = convert_file(Settings(), src, dst)
+    assert ok
+    with Image.open(dst) as out:
+        assert out.size == (16, 16)
+
+
+def test_animated_gif_preserves_animation(tmp_path):
+    src = str(tmp_path / "anim.gif")
+    frames = [Image.new("RGB", (16, 16), c) for c in ("red", "green", "blue")]
+    frames[0].save(src, save_all=True, append_images=frames[1:], duration=100, loop=0)
+    dst = str(tmp_path / "anim.webp")
+    ok, _, _, _ = convert_file(Settings(delete_originals=True), src, dst)
+    assert ok
+    with Image.open(dst) as out:
+        assert getattr(out, "n_frames", 1) == 3
+
+
+def test_run_batch_events_and_cancel(tmp_path):
+    plan = []
+    for i in range(6):
+        src = str(tmp_path / f"img_{i}.png")
+        Image.new("RGB", (8, 8), "red").save(src)
+        plan.append((src, str(tmp_path / f"img_{i}.webp")))
+
+    events: list[BatchEvent] = []
+    cancel = threading.Event()
+
+    def on_event(ev: BatchEvent):
+        events.append(ev)
+        if ev.kind == "file_completed":
+            cancel.set()
+
+    summary = run_batch(Settings(max_workers=1), plan, on_event=on_event, cancel_event=cancel)
+    assert summary.cancelled is True
+    assert summary.succeeded < len(plan)
+    assert events[0].kind == "batch_started" and events[-1].kind == "batch_finished"
+
+
+def test_cli_exit_codes_and_collision_end_to_end(tmp_path):
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     script = os.path.join(repo, "WebP-Image-Converter.py")
     Image.new("RGB", (8, 8), "red").save(tmp_path / "same.png")
     Image.new("RGB", (8, 8), "blue").save(tmp_path / "same.jpg")
 
-    r = subprocess.run([sys.executable, script, str(tmp_path), "--delete-originals", "-w", "2"],
-                       capture_output=True, text=True, encoding="utf-8")
+    r = subprocess.run(
+        [sys.executable, script, str(tmp_path), "--delete-originals", "-w", "2"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
     assert r.returncode == 0, r.stderr
     assert sorted(os.listdir(tmp_path)) == ["same_jpg.webp", "same_png.webp"]
 
     r = subprocess.run([sys.executable, script, str(tmp_path / "missing")], capture_output=True)
     assert r.returncode == 2
-
-
-@pytest.mark.parametrize("ext", [".bmp", ".gif", ".tif"])
-def test_static_formats_convert(conv, tools, tmp_path, ext):
-    src = str(tmp_path / f"img{ext}")
-    Image.new("RGB", (16, 16), "green").save(src)
-    dst = str(tmp_path / "img.webp")
-    assert conv.process_image_file(settings(conv, tools), src, dst)
-    with Image.open(dst) as out:
-        assert out.size == (16, 16)
-
-
-def test_animated_gif_keeps_animation_or_is_skipped(conv, tools, tmp_path):
-    src = str(tmp_path / "anim.gif")
-    frames = [Image.new("RGB", (16, 16), c) for c in ("red", "green", "blue")]
-    frames[0].save(src, save_all=True, append_images=frames[1:], duration=100, loop=0)
-    dst = str(tmp_path / "anim.webp")
-    ok = conv.process_image_file(settings(conv, tools, delete_originals=True), src, dst)
-    if "gif2webp" in tools:
-        assert ok
-        with Image.open(dst) as out:
-            assert getattr(out, "n_frames", 1) == 3
-    else:
-        assert not ok and os.path.exists(src), "animated GIF must not be flattened and deleted"
