@@ -3,8 +3,10 @@
 import logging
 import os
 from pathlib import Path
+import string
+import sys
 import threading
-from typing import Iterable, Optional
+from typing import Iterable, List, Optional, Set
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -26,8 +28,16 @@ from textual.widgets import (
 
 from . import __version__
 from .cli import format_bytes
-from .config import Settings, load_config, save_config, settings_from_config
+from .config import Settings, load_config, normalise_formats, save_config, settings_from_config
 from .core import BatchEvent, check_folder, plan_conversions, run_batch, scan_folder
+
+
+def _windows_drives() -> List[str]:
+    if not sys.platform.startswith("win"):
+        return []
+    if hasattr(os, "listdrives"):
+        return list(os.listdrives())
+    return [f"{ch}:\\" for ch in string.ascii_uppercase if os.path.exists(f"{ch}:\\")]
 
 
 class FolderTree(DirectoryTree):
@@ -99,6 +109,7 @@ class WebPConverterApp(App[None]):
     CSS = """
     Screen {
         layout: vertical;
+        background: $background;
     }
     #workspace {
         height: 1fr;
@@ -106,7 +117,8 @@ class WebPConverterApp(App[None]):
     #left-pane {
         width: 36;
         min-width: 28;
-        border: round $primary;
+        background: $surface;
+        border: round $secondary;
         padding: 0 1;
     }
     #right-pane {
@@ -115,11 +127,29 @@ class WebPConverterApp(App[None]):
     }
     .pane-title {
         text-style: bold;
-        color: $accent;
+        color: $primary;
         padding: 0 0 1 0;
     }
     #folder-tree {
         height: 1fr;
+        background: $surface;
+    }
+    #drive-row {
+        height: auto;
+        margin-bottom: 1;
+    }
+    .drive-btn {
+        min-width: 5;
+        height: 1;
+        margin-right: 1;
+        padding: 0 1;
+        border: none;
+        background: $panel;
+        color: $primary;
+    }
+    .drive-btn:hover {
+        background: $secondary;
+        color: $background;
     }
     #path-row {
         height: auto;
@@ -133,13 +163,14 @@ class WebPConverterApp(App[None]):
         margin-left: 1;
     }
     #preview-label {
-        color: $text-muted;
+        color: $secondary;
         height: auto;
         margin-bottom: 1;
     }
     #settings-box {
         height: auto;
-        border: round $primary-darken-2;
+        background: $surface;
+        border: round $panel;
         padding: 1;
         margin-bottom: 1;
     }
@@ -149,14 +180,19 @@ class WebPConverterApp(App[None]):
     }
     .field-label {
         width: 11;
+        color: $foreground;
         content-align: left middle;
     }
     .num-input {
         width: 10;
         margin-right: 2;
     }
+    #formats-input {
+        width: 1fr;
+    }
     .switch-label {
         width: 18;
+        color: $foreground;
         content-align: left middle;
     }
     Switch {
@@ -174,12 +210,13 @@ class WebPConverterApp(App[None]):
         margin-bottom: 1;
     }
     #status-line {
-        color: $text-muted;
+        color: $primary;
         height: 1;
     }
     #log-view {
         height: 1fr;
-        border: round $surface-lighten-2;
+        background: $surface;
+        border: round $panel;
     }
     """
 
@@ -192,6 +229,7 @@ class WebPConverterApp(App[None]):
 
     def __init__(self, initial_folder: Optional[str] = None) -> None:
         super().__init__()
+        self.theme = "nord"
         self._config = load_config()
         try:
             self._settings = settings_from_config(self._config)
@@ -206,6 +244,12 @@ class WebPConverterApp(App[None]):
         with Horizontal(id="workspace"):
             with Vertical(id="left-pane"):
                 yield Label("Folders", classes="pane-title")
+                drives = _windows_drives()
+                if drives:
+                    with Horizontal(id="drive-row"):
+                        for drv in drives:
+                            label = drv.rstrip("\\")
+                            yield Button(label, id=f"drive-{label[0]}", classes="drive-btn")
                 start_root = self._tree_root_for(self._initial_folder)
                 yield FolderTree(start_root, id="folder-tree")
             with Vertical(id="right-pane"):
@@ -233,6 +277,13 @@ class WebPConverterApp(App[None]):
                         yield Switch(value=self._settings.overwrite, id="overwrite-switch")
                         yield Label("Delete originals:", classes="switch-label")
                         yield Switch(value=self._settings.delete_originals, id="delete-switch")
+                    with Horizontal(classes="setting-row"):
+                        yield Label("Formats:", classes="field-label")
+                        yield Input(
+                            value=" ".join(sorted(self._settings.supported_formats)),
+                            placeholder=".jpg .jpeg .png .tif .tiff .bmp .gif",
+                            id="formats-input",
+                        )
 
                 with Horizontal(id="actions"):
                     yield Button("Convert", id="convert-btn", variant="primary")
@@ -249,7 +300,7 @@ class WebPConverterApp(App[None]):
 
     def on_mount(self) -> None:
         self._sync_lossless_state()
-        self._refresh_preview(self._initial_folder, self._settings.recursive)
+        self._refresh_preview(self._initial_folder, self._settings.recursive, self._settings.supported_formats)
 
     @staticmethod
     def _tree_root_for(folder: str) -> Path:
@@ -260,8 +311,16 @@ class WebPConverterApp(App[None]):
         return p.parent if p.parent != p else p
 
     def _sync_lossless_state(self) -> None:
+        if not self.is_mounted:
+            return
         lossless = self.query_one("#lossless-switch", Switch).value
         self.query_one("#quality-input", Input).disabled = lossless
+
+    def _parse_formats_input(self) -> Set[str]:
+        raw = self.query_one("#formats-input", Input).value.replace(",", " ").split()
+        if not raw:
+            raise ValueError("Formats cannot be empty (e.g. .jpg .png).")
+        return normalise_formats(raw)
 
     def _read_settings(self) -> Optional[Settings]:
         """Validate UI inputs into a Settings object, logging errors on bad values."""
@@ -276,8 +335,9 @@ class WebPConverterApp(App[None]):
             workers = int(self.query_one("#workers-input", Input).value.strip())
             if workers < 1:
                 raise ValueError("Workers must be at least 1.")
+            formats = self._parse_formats_input()
         except ValueError as e:
-            log.write(f"[red]Invalid setting:[/red] {e}")
+            log.write(f"[#BF616A]Invalid setting:[/#BF616A] {e}")
             return None
 
         return Settings(
@@ -288,7 +348,7 @@ class WebPConverterApp(App[None]):
             overwrite=self.query_one("#overwrite-switch", Switch).value,
             recursive=self.query_one("#recursive-switch", Switch).value,
             max_workers=workers,
-            supported_formats=set(self._settings.supported_formats),
+            supported_formats=formats,
         )
 
     def _set_running(self, running: bool) -> None:
@@ -297,13 +357,19 @@ class WebPConverterApp(App[None]):
             self.query_one(widget_id).disabled = running
         self.query_one("#cancel-btn", Button).disabled = not running
 
+    def _current_formats(self) -> Set[str]:
+        try:
+            return self._parse_formats_input()
+        except ValueError:
+            return set(self._settings.supported_formats)
+
     def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
         if self._busy:
             return
         folder = str(event.path)
         self.query_one("#folder-input", Input).value = folder
         recursive = self.query_one("#recursive-switch", Switch).value
-        self._refresh_preview(folder, recursive)
+        self._refresh_preview(folder, recursive, self._current_formats())
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if event.switch.id == "lossless-switch":
@@ -312,41 +378,58 @@ class WebPConverterApp(App[None]):
             self._refresh_preview(
                 self.query_one("#folder-input", Input).value,
                 event.value,
+                self._current_formats(),
             )
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "folder-input" and not self._busy:
+        if self._busy:
+            return
+        if event.input.id == "folder-input":
             self._open_typed_folder()
+        elif event.input.id == "formats-input":
+            recursive = self.query_one("#recursive-switch", Switch).value
+            self._refresh_preview(
+                self.query_one("#folder-input", Input).value,
+                recursive,
+                self._current_formats(),
+            )
 
     def _open_typed_folder(self) -> None:
         raw = self.query_one("#folder-input", Input).value
         folder, err = check_folder(raw)
         if err or not folder:
-            self.query_one("#preview-label", Static).update(f"[red]{err}[/red]")
+            self.query_one("#preview-label", Static).update(f"[#BF616A]{err}[/#BF616A]")
             return
         self.query_one("#folder-input", Input).value = folder
         tree = self.query_one("#folder-tree", FolderTree)
         tree.path = Path(folder)
         recursive = self.query_one("#recursive-switch", Switch).value
-        self._refresh_preview(folder, recursive)
+        self._refresh_preview(folder, recursive, self._current_formats())
 
     @work(thread=True, exclusive=True, group="preview")
-    def _refresh_preview(self, raw_path: str, recursive: bool = True) -> None:
+    def _refresh_preview(self, raw_path: str, recursive: bool = True, formats: Optional[Set[str]] = None) -> None:
         folder, err = check_folder(raw_path)
         if err or not folder:
             self.call_from_thread(
                 self.query_one("#preview-label", Static).update,
-                f"[red]{err}[/red]",
+                f"[#BF616A]{err}[/#BF616A]",
             )
             return
-        files = scan_folder(folder, self._settings.supported_formats, recursive=recursive)
+        active_formats = formats if formats is not None else self._settings.supported_formats
+        files = scan_folder(folder, active_formats, recursive=recursive)
         total_bytes = sum(os.path.getsize(f) for f in files if os.path.exists(f))
         msg = f"{len(files)} supported image(s) found ({format_bytes(total_bytes)})"
         self.call_from_thread(self.query_one("#preview-label", Static).update, msg)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        bid = event.button.id
-        if bid == "go-btn":
+        bid = event.button.id or ""
+        if bid.startswith("drive-") and not self._busy:
+            drive_root = f"{bid.split('-', 1)[1]}:\\"
+            self.query_one("#folder-input", Input).value = drive_root
+            self.query_one("#folder-tree", FolderTree).path = Path(drive_root)
+            recursive = self.query_one("#recursive-switch", Switch).value
+            self._refresh_preview(drive_root, recursive, self._current_formats())
+        elif bid == "go-btn":
             self._open_typed_folder()
         elif bid == "convert-btn":
             self.action_start_convert()
@@ -365,9 +448,9 @@ class WebPConverterApp(App[None]):
         log = self.query_one("#log-view", RichLog)
         if saved_to:
             self._settings = settings
-            log.write(f"[green]Settings saved to[/green] {saved_to}")
+            log.write(f"[#A3BE8C]Settings saved to[/#A3BE8C] {saved_to}")
         else:
-            log.write("[red]Failed to save settings.[/red]")
+            log.write("[#BF616A]Failed to save settings.[/#BF616A]")
 
     def action_start_dry_run(self) -> None:
         self._launch(dry_run=True)
@@ -395,24 +478,24 @@ class WebPConverterApp(App[None]):
 
         folder, err = check_folder(self.query_one("#folder-input", Input).value)
         if err or not folder:
-            log.write(f"[red]{err}[/red]")
+            log.write(f"[#BF616A]{err}[/#BF616A]")
             return
 
         images = scan_folder(folder, settings.supported_formats, recursive=settings.recursive)
         if not images:
-            log.write("[yellow]No supported images found in that folder.[/yellow]")
+            log.write("[#EBCB8B]No supported images found in that folder.[/#EBCB8B]")
             return
 
         plan, skipped = plan_conversions(images, overwrite=settings.overwrite)
         if dry_run:
             log.clear()
-            log.write(f"[cyan]Dry run:[/cyan] {len(plan)} file(s) to convert, {len(skipped)} skipped.")
+            log.write(f"[#88C0D0]Dry run:[/#88C0D0] {len(plan)} file(s) to convert, {len(skipped)} skipped.")
             for src, dst in plan:
                 log.write(f"  {src} -> {os.path.basename(dst)}")
             return
 
         if not plan:
-            log.write(f"[yellow]Nothing to convert ({len(skipped)} skipped due to name conflicts).[/yellow]")
+            log.write(f"[#EBCB8B]Nothing to convert ({len(skipped)} skipped due to name conflicts).[/#EBCB8B]")
             return
 
         if settings.delete_originals:
@@ -428,9 +511,9 @@ class WebPConverterApp(App[None]):
         log = self.query_one("#log-view", RichLog)
         log.clear()
         mode = "lossless" if settings.lossless else f"quality={settings.quality}"
-        log.write(f"[cyan]Starting:[/cyan] {len(plan)} file(s), {mode}, method={settings.method}, workers={settings.max_workers}")
+        log.write(f"[#88C0D0]Starting:[/#88C0D0] {len(plan)} file(s), {mode}, method={settings.method}, workers={settings.max_workers}")
         if skipped:
-            log.write(f"[yellow]Skipped {len(skipped)} file(s) due to name conflicts.[/yellow]")
+            log.write(f"[#EBCB8B]Skipped {len(skipped)} file(s) due to name conflicts.[/#EBCB8B]")
 
         bar = self.query_one("#progress-bar", ProgressBar)
         bar.update(total=len(plan), progress=0)
@@ -456,13 +539,13 @@ class WebPConverterApp(App[None]):
             pct = (100.0 * (ev.bytes_after - ev.bytes_before) / ev.bytes_before) if ev.bytes_before else 0.0
             status.update(f"{ev.completed}/{ev.total} - {os.path.basename(ev.dst)}")
             log.write(
-                f"[green]OK[/green] {os.path.basename(ev.src)} -> {os.path.basename(ev.dst)} "
+                f"[#A3BE8C]OK[/#A3BE8C] {os.path.basename(ev.src)} -> {os.path.basename(ev.dst)} "
                 f"({format_bytes(ev.bytes_before)} -> {format_bytes(ev.bytes_after)}, {pct:+.1f}%)"
             )
         elif ev.kind == "file_failed":
             bar.update(progress=ev.completed)
             status.update(f"{ev.completed}/{ev.total} - failed: {os.path.basename(ev.src)}")
-            log.write(f"[red]FAIL[/red] {ev.src}: {ev.error}")
+            log.write(f"[#BF616A]FAIL[/#BF616A] {ev.src}: {ev.error}")
         elif ev.kind == "batch_finished" and ev.summary is not None:
             s = ev.summary
             self._set_running(False)
@@ -475,10 +558,10 @@ class WebPConverterApp(App[None]):
                 f"({format_bytes(abs(saved))} {direction}, {abs(pct):.1f}%)"
             )
             status.update(summary_text)
-            color = "yellow" if (s.failed or s.skipped or s.cancelled) else "green"
+            color = "#EBCB8B" if (s.failed or s.skipped or s.cancelled) else "#A3BE8C"
             log.write(f"[{color}]{summary_text}[/{color}]")
             recursive = self.query_one("#recursive-switch", Switch).value
-            self._refresh_preview(self.query_one("#folder-input", Input).value, recursive)
+            self._refresh_preview(self.query_one("#folder-input", Input).value, recursive, self._current_formats())
 
 
 def run_tui(initial_folder: Optional[str] = None) -> None:

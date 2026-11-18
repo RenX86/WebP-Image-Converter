@@ -223,11 +223,29 @@ def test_cli_exit_codes_and_collision_end_to_end(tmp_path):
     Image.new("RGB", (8, 8), "blue").save(tmp_path / "same.jpg")
 
     r = subprocess.run(
-        [sys.executable, script, str(tmp_path), "--delete-originals", "-w", "2"],
+        [sys.executable, script, "--cli", str(tmp_path), "--delete-originals", "-w", "2"],
         capture_output=True, text=True, encoding="utf-8",
     )
     assert r.returncode == 0, r.stderr
     assert sorted(os.listdir(tmp_path)) == ["same_jpg.webp", "same_png.webp"]
 
-    r = subprocess.run([sys.executable, script, str(tmp_path / "missing")], capture_output=True)
+    r = subprocess.run([sys.executable, script, "--cli", str(tmp_path / "missing")], capture_output=True)
     assert r.returncode == 2
+
+
+def test_main_dispatches_to_tui_by_default(monkeypatch):
+    from webp_converter import main as main_mod
+    called = {}
+    monkeypatch.setattr("webp_converter.tui.run_tui", lambda initial_folder=None: called.setdefault("tui", initial_folder))
+    monkeypatch.setattr("webp_converter.cli.run_cli", lambda argv=None: (called.setdefault("cli", argv), 0)[1])
+
+    assert main_mod.main([]) == 0
+    assert called["tui"] is None
+    called.clear()
+
+    assert main_mod.main([r"D:\Photos"]) == 0
+    assert called["tui"] == r"D:\Photos"
+    called.clear()
+
+    assert main_mod.main(["--cli", r"D:\Photos", "-q", "80"]) == 0
+    assert called["cli"] == [r"D:\Photos", "-q", "80"]

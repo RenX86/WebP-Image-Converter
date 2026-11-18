@@ -23,23 +23,33 @@ A fast, safe batch image-to-WebP converter for Windows with an interactive **Ter
 
 ## Installation
 
-### Recommended: install as a global terminal command
+### Recommended: install globally from PyPI
 
-Using `pipx` or `uv`:
+Using `uv` or `pipx` (adds `webp-converter` to your `PATH` in an isolated environment):
 
 ```powershell
-pipx install .
+uv tool install webp-tui
 # or
-uv tool install .
+pipx install webp-tui
 ```
 
-Or install into your Python environment from the repository root:
+Or with `pip`:
 
 ```powershell
-pip install -e .
+pip install webp-tui
 ```
 
 After installation, `webp-converter` can be launched from any folder in PowerShell, Command Prompt, or Windows Terminal.
+
+### Installing from local source (development)
+
+```powershell
+# Global editable install with uv:
+uv tool install -e .
+
+# Or inside a virtual environment:
+pip install -e ".[dev]"
+```
 
 ### Running without installing globally
 
@@ -52,12 +62,14 @@ Or double-click / run `run-webp-converter.bat`.
 
 ## Usage
 
-### Interactive Terminal UI (TUI)
+### Interactive Terminal UI (TUI — Default)
 
-Run with no arguments (or pass `--tui`):
+Run with no arguments, or pass a starting folder path:
 
 ```powershell
 webp-converter
+# or open directly on a folder:
+webp-converter C:\Users\Name\Pictures\Batch
 ```
 
 Keybindings inside the TUI:
@@ -66,17 +78,18 @@ Keybindings inside the TUI:
 - `Esc`: Cancel a running batch
 - `Ctrl+Q`: Quit
 
-### Command-Line Interface (CLI)
+### Command-Line Interface (CLI — Secondary)
 
-Pass a folder path and optional flags:
+Pass `--cli` along with a folder path and flags for headless/scripted runs:
 
 ```powershell
-webp-converter C:\Users\Name\Pictures\Batch [OPTIONS]
+webp-converter --cli C:\Users\Name\Pictures\Batch [OPTIONS]
 ```
 
 #### Options
 
-- `--tui`: Launch the interactive terminal UI
+- `--cli`: Run in headless command-line mode instead of opening the TUI
+- `--tui`: Force the interactive terminal UI (default)
 - `--quality, -q`: WebP quality `0–100` (default: `90`)
 - `--lossless` / `--lossy`: Pixel-exact lossless encoding / force lossy
 - `--method, -m`: WebP compression effort `0–6` (`0` fastest, `6` smallest; default: `4`)
@@ -95,16 +108,16 @@ webp-converter C:\Users\Name\Pictures\Batch [OPTIONS]
 
 ```powershell
 # Convert a folder at quality 85
-webp-converter D:\Photos --quality 85
+webp-converter --cli D:\Photos --quality 85
 
 # Lossless conversion, deleting originals only after success
-webp-converter D:\Screenshots --lossless --delete-originals
+webp-converter --cli D:\Screenshots --lossless --delete-originals
 
 # Top-level folder only, dry run
-webp-converter D:\Uploads --no-recursive --dry-run
+webp-converter --cli D:\Uploads --no-recursive --dry-run
 
 # Maximum compression effort with 8 worker threads
-webp-converter D:\Exports -q 80 -m 6 -w 8
+webp-converter --cli D:\Exports -q 80 -m 6 -w 8
 ```
 
 ## Configuration

@@ -13,13 +13,13 @@ def test_tui_dry_run_and_convert(tmp_path):
         app = WebPConverterApp(initial_folder=str(tmp_path))
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            assert app.theme == "nord"
             # Lossless switch disables quality input
-            sw = app.query_one("#lossless-switch", Switch)
-            sw.value = True
-            await pilot.pause()
+            await pilot.click("#lossless-switch")
+            await pilot.pause(0.1)
             assert app.query_one("#quality-input", Input).disabled is True
-            sw.value = False
-            await pilot.pause()
+            await pilot.click("#lossless-switch")
+            await pilot.pause(0.1)
 
             # Dry run leaves folder untouched
             await pilot.click("#dry-run-btn")
@@ -57,5 +57,25 @@ def test_tui_delete_originals_shows_confirmation(tmp_path):
             await pilot.pause()
             assert (tmp_path / "pic.png").exists()
             assert list(tmp_path.glob("*.webp")) == []
+
+    asyncio.run(scenario())
+
+
+def test_tui_formats_filter(tmp_path):
+    Image.new("RGB", (16, 16), "red").save(tmp_path / "keep.png")
+    Image.new("RGB", (16, 16), "blue").save(tmp_path / "skip.jpg")
+
+    async def scenario():
+        app = WebPConverterApp(initial_folder=str(tmp_path))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#formats-input", Input).value = ".png"
+            await pilot.click("#convert-btn")
+            for _ in range(40):
+                await pilot.pause(0.1)
+                if not app._busy:
+                    break
+            assert (tmp_path / "keep.webp").exists()
+            assert not (tmp_path / "skip.webp").exists()
 
     asyncio.run(scenario())

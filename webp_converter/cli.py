@@ -73,10 +73,11 @@ def positive_int(value: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="webp-converter",
-        description="Convert images to WebP format. Run with no arguments to open the interactive TUI.",
+        description="Convert images to WebP. Launches the interactive TUI by default; pass --cli for command-line mode.",
     )
-    parser.add_argument("folder_path", nargs="?", help="Folder path containing images to convert")
-    parser.add_argument("--tui", action="store_true", help="Launch the interactive terminal UI")
+    parser.add_argument("folder_path", nargs="?", help="Folder path to open in TUI, or convert in --cli mode")
+    parser.add_argument("--cli", action="store_true", help="Run in headless command-line mode instead of opening the TUI")
+    parser.add_argument("--tui", action="store_true", help="Force the interactive terminal UI (default)")
     parser.add_argument("--quality", "-q", type=quality_type, default=None, help="WebP quality 0-100 (default: 90)")
     parser.add_argument("--lossless", action="store_true", default=None, help="Use lossless WebP encoding")
     parser.add_argument("--lossy", action="store_false", dest="lossless", help="Use lossy encoding (overrides config)")
