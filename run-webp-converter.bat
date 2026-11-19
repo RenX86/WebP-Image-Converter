@@ -6,6 +6,7 @@ set "SCRIPT_PATH=%~dp0WebP-Image-Converter.py"
 
 if exist "%VENV_PY%" (
     "%VENV_PY%" "%SCRIPT_PATH%" %*
+    set "EXIT_CODE=%errorlevel%"
     goto check_exit
 )
 
@@ -18,10 +19,13 @@ if %errorlevel% neq 0 (
 )
 
 python "%SCRIPT_PATH%" %*
+set "EXIT_CODE=%errorlevel%"
 
 :check_exit
-if %errorlevel% neq 0 (
+if %EXIT_CODE% neq 0 (
     echo.
-    echo Exited with code %errorlevel%.
-    pause
+    echo Exited with code %EXIT_CODE%.
+    echo %* | findstr /i /c:"--cli" >nul
+    if errorlevel 1 pause
 )
+exit /b %EXIT_CODE%

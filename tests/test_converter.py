@@ -53,23 +53,50 @@ def test_plan_never_overwrites_existing_webp(tmp_path):
     assert plan == [(a, str(tmp_path / "a.webp"))]
 
 
-def test_plan_skips_when_all_names_taken(tmp_path):
+def test_plan_numeric_fallback_and_never_self_overwrites(tmp_path):
     (tmp_path / "a.webp").write_bytes(b"x")
     (tmp_path / "a_png.webp").write_bytes(b"x")
     a = str(tmp_path / "a.png")
     plan, skipped = plan_conversions([a])
-    assert plan == [] and skipped == [a]
+    assert plan == [(a, str(tmp_path / "a_png_2.webp"))] and skipped == []
+
+    # Three-way stem collision (photo.jpg, photo.png, photo_jpg.png) converts all three
+    p1 = str(tmp_path / "photo.jpg")
+    p2 = str(tmp_path / "photo.png")
+    p3 = str(tmp_path / "photo_jpg.png")
+    plan3, skipped3 = plan_conversions([p1, p2, p3])
+    assert len(plan3) == 3 and skipped3 == []
+    assert len({os.path.normcase(dst) for _, dst in plan3}) == 3
+
+    # .webp input is skipped rather than planning src == dst
+    w = str(tmp_path / "a.webp")
+    plan_w, skipped_w = plan_conversions([w], overwrite=True)
+    assert plan_w == [] and skipped_w == [w]
 
 
 # ---------------------------------------------------------------- scanning & config
 
-def test_scan_non_recursive(tmp_path):
+def test_scan_top_level_default_and_recursive_pruning(tmp_path):
     sub = tmp_path / "sub"
     sub.mkdir()
+    hidden = tmp_path / ".venv"
+    hidden.mkdir()
     Image.new("RGB", (8, 8)).save(tmp_path / "top.png")
     Image.new("RGB", (8, 8)).save(sub / "nested.png")
-    assert len(scan_folder(str(tmp_path), {".png"}, recursive=True)) == 2
-    assert len(scan_folder(str(tmp_path), {".png"}, recursive=False)) == 1
+    Image.new("RGB", (8, 8)).save(hidden / "ignored.gif")
+
+    # Default (recursive=False): strictly direct children of selected folder
+    top_only = scan_folder(str(tmp_path), {".png", ".gif"})
+    assert [os.path.basename(p) for p in top_only] == ["top.png"]
+
+    # recursive=True: includes normal subfolders, skips hidden/.venv folders
+    rec = scan_folder(str(tmp_path), {".png", ".gif"}, recursive=True)
+    assert sorted(os.path.basename(p) for p in rec) == ["nested.png", "top.png"]
+
+    # Cancelled scan returns empty immediately
+    cancel = threading.Event()
+    cancel.set()
+    assert scan_folder(str(tmp_path), {".png", ".gif"}, recursive=True, cancel_event=cancel) == []
 
 
 def test_cli_overrides_config():
@@ -236,16 +263,176 @@ def test_cli_exit_codes_and_collision_end_to_end(tmp_path):
 def test_main_dispatches_to_tui_by_default(monkeypatch):
     from webp_converter import main as main_mod
     called = {}
-    monkeypatch.setattr("webp_converter.tui.run_tui", lambda initial_folder=None: called.setdefault("tui", initial_folder))
+    monkeypatch.setattr(
+        "webp_converter.tui.run_tui",
+        lambda initial_folder=None, config_file=None: called.update(tui=initial_folder, config=config_file),
+    )
     monkeypatch.setattr("webp_converter.cli.run_cli", lambda argv=None: (called.setdefault("cli", argv), 0)[1])
 
     assert main_mod.main([]) == 0
-    assert called["tui"] is None
+    assert called["tui"] is None and called["config"] is None
     called.clear()
 
     assert main_mod.main([r"D:\Photos"]) == 0
     assert called["tui"] == r"D:\Photos"
     called.clear()
 
+    assert main_mod.main(["--", "-hyphen-folder"]) == 0
+    assert called["tui"] == "-hyphen-folder"
+    called.clear()
+
+    assert main_mod.main(["--config", "custom.json", r"D:\Photos"]) == 0
+    assert called["tui"] == r"D:\Photos" and called["config"] == "custom.json"
+    called.clear()
+
+    assert main_mod.main(["--cli", "--tui"]) == 2
+
     assert main_mod.main(["--cli", r"D:\Photos", "-q", "80"]) == 0
     assert called["cli"] == [r"D:\Photos", "-q", "80"]
+
+
+# ---------------------------------------------------------------- bug-hunt regressions
+
+def test_config_strict_validation_prevents_string_false_and_null_crashes(tmp_path):
+    from webp_converter.config import load_config, settings_from_config
+    from webp_converter.cli import quality_type
+    import argparse
+
+    # String "false" MUST parse as False (never True via bool("false"))
+    s = settings_from_config({"delete_originals": "false", "lossless": "0", "recursive": "no"})
+    assert (s.delete_originals, s.lossless, s.recursive) == (False, False, False)
+
+    # Bad types raise ValueError (not uncaught TypeError/OverflowError)
+    for bad in (
+        {"webp_quality": None},
+        {"webp_quality": "inf"},
+        {"webp_quality": True},
+        {"max_workers": None},
+        {"supported_formats": ".png"},
+        {"supported_formats": [".webp"]},
+        {"delete_originals": "maybe"},
+    ):
+        with pytest.raises(ValueError):
+            settings_from_config(bad)
+
+    # CLI override rescues bad value in config.json
+    s = build_settings(build_parser().parse_args(["x", "-q", "80"]), {"webp_quality": 999})
+    assert s.quality == 80
+
+    # Strict load_config fails on missing explicit file
+    with pytest.raises(ValueError):
+        load_config(str(tmp_path / "nope.json"), strict=True)
+
+    # -q inf raises clean ArgumentTypeError
+    with pytest.raises(argparse.ArgumentTypeError):
+        quality_type("inf")
+
+
+def test_16bit_grayscale_png_scales_correctly_not_solid_white(tmp_path):
+    src = str(tmp_path / "gray16.png")
+    im = Image.new("I;16", (8, 8), 32768)  # 50% mid-gray
+    im.save(src)
+    dst = str(tmp_path / "gray16.webp")
+    ok, _, _, err = convert_file(Settings(lossless=True), src, dst)
+    assert ok, err
+    with Image.open(dst) as out:
+        px = out.convert("RGB").getpixel((0, 0))
+        assert 120 <= px[0] <= 135, f"Expected mid-gray ~128, got {px}"
+
+
+def test_cmyk_and_grayscale_drop_mismatched_icc_profiles(tmp_path):
+    src = str(tmp_path / "cmyk.jpg")
+    Image.new("CMYK", (16, 16), (0, 255, 255, 0)).save(src)
+    dst = str(tmp_path / "cmyk.webp")
+    ok, _, _, err = convert_file(Settings(), src, dst)
+    assert ok, err
+    with Image.open(dst) as out:
+        assert out.size == (16, 16)
+
+
+def test_animated_gif_preserves_variable_durations_and_loop(tmp_path):
+    src = str(tmp_path / "var.gif")
+    frames = [Image.new("RGB", (16, 16), c) for c in ("red", "green", "blue")]
+    frames[0].save(src, save_all=True, append_images=frames[1:], duration=[80, 320, 160], loop=3)
+    dst = str(tmp_path / "var.webp")
+    ok, _, _, err = convert_file(Settings(), src, dst)
+    assert ok, err
+    with Image.open(dst) as out:
+        assert getattr(out, "n_frames", 1) == 3
+        assert out.info.get("loop") == 3
+        durs = []
+        for i in range(3):
+            out.seek(i)
+            out.load()
+            durs.append(out.info.get("duration"))
+        assert durs == [80, 320, 160]
+
+
+def test_multipage_tiff_mixed_sizes_converts_cleanly(tmp_path):
+    src = str(tmp_path / "multi.tif")
+    page1 = Image.new("RGB", (32, 32), "red")
+    page2 = Image.new("RGB", (16, 16), "blue")  # thumbnail IFD
+    page1.save(src, save_all=True, append_images=[page2])
+    dst = str(tmp_path / "multi.webp")
+    ok, _, _, err = convert_file(Settings(), src, dst)
+    assert ok, err
+    with Image.open(dst) as out:
+        assert out.size == (32, 32)
+        assert getattr(out, "n_frames", 1) == 1
+
+
+def test_rotated_tiff_preserves_exif_and_applies_orientation(tmp_path):
+    src = str(tmp_path / "rot.tif")
+    im = Image.new("RGB", (20, 10), "red")
+    ex = im.getexif()
+    ex[0x0112] = 6  # Rotate 90 CW
+    ex[0x013B] = "TIFF Artist"
+    im.save(src, exif=ex)
+    dst = str(tmp_path / "rot.webp")
+    ok, _, _, err = convert_file(Settings(), src, dst)
+    assert ok, err
+    with Image.open(dst) as out:
+        assert out.size == (10, 20)
+        assert out.getexif().get(0x013B) == "TIFF Artist"
+        assert out.getexif().get(0x0112) in (None, 1)
+
+
+def test_corrupt_exif_falls_back_cleanly(tmp_path):
+    # Build a valid PNG and inject a malformed eXIf chunk
+    import struct, zlib
+    raw_buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "green").save(raw_buf, format="PNG")
+    data = raw_buf.getvalue()
+    # Insert corrupt eXIf right before IEND (last 12 bytes)
+    payload = b"NOT_EXIF_AT_ALL"
+    chunk = struct.pack(">I", len(payload)) + b"eXIf" + payload + struct.pack(">I", zlib.crc32(b"eXIf" + payload) & 0xFFFFFFFF)
+    src = str(tmp_path / "corrupt_exif.png")
+    with open(src, "wb") as f:
+        f.write(data[:-12] + chunk + data[-12:])
+    dst = str(tmp_path / "corrupt_exif.webp")
+    ok, _, _, err = convert_file(Settings(), src, dst)
+    assert ok, err
+    with Image.open(dst) as out:
+        assert out.size == (8, 8)
+
+
+def test_run_batch_cancelled_does_not_inflate_completed_count(tmp_path):
+    plan = []
+    for i in range(6):
+        src = str(tmp_path / f"c_{i}.png")
+        Image.new("RGB", (8, 8), "red").save(src)
+        plan.append((src, str(tmp_path / f"c_{i}.webp")))
+
+    finished_events = []
+    cancel = threading.Event()
+
+    def on_event(ev: BatchEvent):
+        finished_events.append(ev)
+        if ev.kind == "file_completed":
+            cancel.set()
+
+    summary = run_batch(Settings(max_workers=1), plan, on_event=on_event, cancel_event=cancel)
+    assert summary.cancelled is True
+    last = finished_events[-1]
+    assert last.kind == "batch_finished"
+    assert last.completed == summary.succeeded + summary.failed

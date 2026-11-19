@@ -72,10 +72,20 @@ webp-converter
 webp-converter C:\Users\Name\Pictures\Batch
 ```
 
+Highlights:
+- **Nord Studio layout** with framed panes, live KPI summary bar (total files, before/after size, % saved, errors), and collapsible folder sidebar with Windows drive buttons.
+- **Interactive Queue table**: filter files live, toggle individual files in/out with `Space`, spot stem-collision renames before running, and click **Retry Failed** if any file errors.
+- **Quick Presets**: *High Quality*, *Web Balanced*, *Max Compression*, *Lossless*, or *Custom*, plus checkbox format selection in the **Settings** tab.
+
 Keybindings inside the TUI:
+- `1` / `2` / `3`: Switch between **Queue**, **Settings**, and **Log** tabs
+- `B`: Toggle folder sidebar
+- `/`: Filter queue by filename or extension
+- `Space`: Toggle highlighted file in Queue (or format checkbox in Settings)
 - `Ctrl+R`: Start conversion
-- `Ctrl+D`: Dry run (preview output filenames without modifying files)
-- `Esc`: Cancel a running batch
+- `Ctrl+D`: Dry run (preview output filenames in the Log tab without writing files)
+- `Esc`: Cancel a running batch (or clear active filter)
+- `Ctrl+P`: Open Command Palette
 - `Ctrl+Q`: Quit
 
 ### Command-Line Interface (CLI — Secondary)
@@ -96,7 +106,7 @@ webp-converter --cli C:\Users\Name\Pictures\Batch [OPTIONS]
 - `--keep-originals`: Keep original files after conversion (default)
 - `--delete-originals`: Delete original files after successful conversion
 - `--overwrite`: Overwrite existing `.webp` files instead of choosing a new name
-- `--recursive` / `--no-recursive`: Scan subfolders recursively (default) or top-level only
+- `--recursive` / `--no-recursive`: Also scan subfolders (skips hidden/system/dev folders) / selected folder only (default)
 - `--workers, -w`: Number of worker threads (default: CPU count)
 - `--dry-run`: Preview planned conversions without modifying any files
 - `--formats`: Supported extensions (default: `.jpg .jpeg .png .tif .tiff .bmp .gif`)
@@ -131,7 +141,7 @@ Settings can be saved from the TUI (`Save Config`) or edited in `config.json` (o
     "method": 4,
     "delete_originals": false,
     "overwrite": false,
-    "recursive": true,
+    "recursive": false,
     "supported_formats": [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif"],
     "max_workers": 8
 }

@@ -4,10 +4,11 @@
     "method": 4,
     "delete_originals": false,
     "overwrite": false,
-    "recursive": true,
+    "recursive": false,
     "supported_formats": [
         ".jpg",
         ".jpeg",
+        ".jfif",
         ".png",
         ".tif",
         ".tiff",

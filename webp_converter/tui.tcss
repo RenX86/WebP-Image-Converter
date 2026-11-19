@@ -1,0 +1,311 @@
+/* Nord Studio stylesheet for webp-tui */
+
+Screen {
+    layout: vertical;
+    background: $background;
+}
+
+#workspace {
+    height: 1fr;
+    padding: 0 1;
+}
+
+/* Framed Nord cards (btop / lazygit style) */
+.card {
+    background: $surface;
+    border: round $panel;
+    border-title-align: left;
+    border-title-color: $secondary;
+    border-title-style: bold;
+    border-subtitle-align: right;
+    border-subtitle-color: $text-muted;
+}
+
+.card:focus-within {
+    border: round $primary;
+    border-title-color: $primary;
+}
+
+/* Left collapsible sidebar */
+#left-pane {
+    width: 26;
+    min-width: 22;
+    max-width: 34;
+    margin-right: 1;
+    padding: 0 1;
+}
+
+#left-pane.hidden {
+    display: none;
+}
+
+#drive-row {
+    height: auto;
+    max-height: 2;
+    overflow-x: auto;
+    margin-bottom: 1;
+}
+
+.drive-btn {
+    min-width: 4;
+    margin-right: 1;
+    background: $panel;
+    color: $primary;
+}
+
+.drive-btn:hover {
+    background: $secondary;
+    color: $background;
+}
+
+#folder-tree {
+    height: 1fr;
+    background: $surface;
+}
+
+/* Right main column */
+#right-pane {
+    width: 1fr;
+}
+
+#path-card {
+    height: auto;
+    padding: 0 1;
+    margin-bottom: 0;
+}
+
+#path-row {
+    height: 1;
+    align-vertical: middle;
+}
+
+#folder-input {
+    width: 1fr;
+}
+
+#go-btn {
+    min-width: 6;
+    margin-left: 1;
+}
+
+/* KPI summary strip */
+#summary-bar {
+    height: 1;
+    padding: 0 1;
+    margin: 0 0 1 0;
+    background: $panel;
+    color: $foreground;
+}
+
+/* Main TabbedContent workspace */
+#main-tabs {
+    height: 1fr;
+}
+
+#main-tabs ContentSwitcher {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 0;
+    height: 1fr;
+}
+
+/* Queue tab */
+#queue-toolbar {
+    height: 1;
+    margin-bottom: 1;
+    align-vertical: middle;
+}
+
+.toolbar-label {
+    width: auto;
+    color: $secondary;
+    padding: 0 1 0 0;
+}
+
+#filter-input {
+    width: 1fr;
+    min-width: 10;
+    margin-right: 1;
+}
+
+#preset-select {
+    width: 24;
+}
+
+#queue-table {
+    height: 1fr;
+    background: $surface;
+    border: round $panel;
+}
+
+#queue-table:focus {
+    border: round $primary;
+}
+
+/* Settings tab */
+#settings-scroll {
+    height: 1fr;
+    padding: 1;
+    background: $surface;
+    border: round $panel;
+    overflow-x: auto;
+}
+
+#settings-scroll:focus-within {
+    border: round $primary;
+}
+
+#presets-section {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#presets-label {
+    color: $primary;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#presets-row {
+    height: auto;
+}
+
+.preset-btn {
+    min-width: 8;
+    margin-right: 1;
+}
+
+#preset-hint {
+    color: $text-muted;
+    height: auto;
+    margin-top: 1;
+}
+
+.setting-row {
+    height: 3;
+    align-vertical: middle;
+}
+
+.field-label {
+    width: 9;
+    color: $foreground;
+    content-align: left middle;
+}
+
+.num-input {
+    width: 7;
+    margin-right: 1;
+}
+
+.switch-label {
+    width: 19;
+    color: $foreground;
+    content-align: left middle;
+}
+
+Switch {
+    margin-right: 2;
+}
+
+#formats-section {
+    height: auto;
+    margin-top: 1;
+}
+
+#formats-label {
+    color: $primary;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#formats-list {
+    height: 9;
+    background: $background;
+    border: round $panel;
+}
+
+#formats-list:focus {
+    border: round $primary;
+}
+
+#settings-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+/* Log tab */
+#log-view {
+    height: 1fr;
+    background: $surface;
+    border: round $panel;
+    padding: 0 1;
+}
+
+#log-view:focus {
+    border: round $primary;
+}
+
+/* Bottom Progress & Actions card */
+#progress-card {
+    height: auto;
+    padding: 0 1;
+    margin-top: 1;
+}
+
+#progress-row {
+    height: 1;
+    align-vertical: middle;
+}
+
+#progress-bar {
+    width: 1fr;
+    max-width: 28;
+    margin-right: 1;
+}
+
+#status-line {
+    width: 2fr;
+    color: $primary;
+    height: 1;
+}
+
+#actions-row {
+    height: 1;
+    margin-top: 1;
+}
+
+#actions-row Button {
+    min-width: 8;
+    margin-right: 1;
+}
+
+/* Delete confirmation modal */
+ConfirmDeleteScreen {
+    align: center middle;
+}
+
+#confirm-dialog {
+    width: 58;
+    height: auto;
+    padding: 1 2;
+    border: thick $error;
+    background: $surface;
+}
+
+#confirm-title {
+    text-style: bold;
+    color: $error;
+    margin-bottom: 1;
+}
+
+#confirm-buttons {
+    margin-top: 1;
+    height: auto;
+    align-horizontal: right;
+}
+
+#confirm-buttons Button {
+    margin-left: 1;
+}

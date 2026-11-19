@@ -2,16 +2,18 @@
 
 import argparse
 import logging
+import math
 import os
+import threading
 from typing import Any, Dict, List, Optional
 
+from rich.console import Console
+from rich.logging import RichHandler
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from .config import (
-    DEFAULT_CONFIG_FILE,
     Settings,
     load_config,
-    normalise_formats,
     settings_from_config,
 )
 from .core import BatchEvent, plan_conversions, run_batch, scan_folder, validate_folder_path
@@ -21,30 +23,57 @@ EXIT_PARTIAL_FAILURE = 1
 EXIT_FATAL = 2
 
 
-def setup_logging(log_file: Optional[str] = None, verbose: bool = False) -> None:
-    """Configure console and optional file logging."""
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
+def setup_logging(
+    log_file: Optional[str] = None,
+    verbose: bool = False,
+    console: Optional[Console] = None,
+) -> Optional[str]:
+    """
+    Configure console and optional file logging.
+    Returns an error string if log_file could not be opened, else None.
+    """
+    root = logging.getLogger()
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
 
     level = logging.DEBUG if verbose else logging.INFO
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter("%(levelname)s - %(message)s"))
+    console_handler = RichHandler(
+        console=console or Console(stderr=True),
+        show_time=False,
+        show_path=False,
+        markup=False,
+    )
+    console_handler.setFormatter(logging.Formatter("%(message)s"))
     console_handler.setLevel(level)
-    logging.getLogger().addHandler(console_handler)
-    logging.getLogger().setLevel(logging.DEBUG if log_file else level)
+    root.addHandler(console_handler)
+    root.setLevel(logging.DEBUG if log_file else level)
 
     if log_file:
-        file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
-        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        file_handler.setLevel(logging.DEBUG)
-        logging.getLogger().addHandler(file_handler)
+        try:
+            parent = os.path.dirname(os.path.abspath(log_file))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+            file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+            file_handler.setLevel(logging.DEBUG)
+            root.addHandler(file_handler)
+        except OSError as e:
+            return f"Could not open log file {log_file}: {e}"
+    return None
 
 
 def quality_type(value: str) -> int:
     try:
-        q = int(float(value))
+        f = float(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"quality must be a number, got {value!r}")
+    if not math.isfinite(f):
+        raise argparse.ArgumentTypeError(f"quality must be a finite number, got {value!r}")
+    q = int(f)
     if not 0 <= q <= 100:
         raise argparse.ArgumentTypeError("quality must be between 0 and 100")
     return q
@@ -85,30 +114,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep-originals", action="store_false", dest="delete_originals", default=None, help="Keep original files (default)")
     parser.add_argument("--delete-originals", action="store_true", dest="delete_originals", help="Delete original files after successful conversion")
     parser.add_argument("--overwrite", action="store_true", default=None, help="Overwrite existing .webp files")
-    parser.add_argument("--recursive", action="store_true", default=None, help="Scan subfolders recursively (default)")
-    parser.add_argument("--no-recursive", action="store_false", dest="recursive", help="Only scan the top-level folder")
+    parser.add_argument("--no-overwrite", action="store_false", dest="overwrite", help="Never overwrite existing .webp files (overrides config)")
+    parser.add_argument("--recursive", action="store_true", default=None, help="Also scan subfolders recursively")
+    parser.add_argument("--no-recursive", action="store_false", dest="recursive", help="Only scan the selected folder (default)")
     parser.add_argument("--workers", "-w", type=positive_int, default=None, help="Number of worker threads")
     parser.add_argument("--dry-run", action="store_true", help="Preview what would be converted without making changes")
     parser.add_argument("--formats", nargs="+", default=None, help="Supported image formats (e.g. .jpg .png)")
     parser.add_argument("--log-file", type=str, help="Write detailed logs to a file")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
-    parser.add_argument("--config", type=str, default=DEFAULT_CONFIG_FILE, help="Configuration JSON path")
+    parser.add_argument("--config", type=str, default=None, help="Configuration JSON path")
     return parser
 
 
 def build_settings(args: argparse.Namespace, config: Dict[str, Any]) -> Settings:
-    """Merge config.json values with CLI overrides (CLI wins)."""
-    base = settings_from_config(config)
-    return Settings(
-        quality=args.quality if args.quality is not None else base.quality,
-        lossless=args.lossless if args.lossless is not None else base.lossless,
-        method=args.method if args.method is not None else base.method,
-        delete_originals=args.delete_originals if args.delete_originals is not None else base.delete_originals,
-        overwrite=args.overwrite if args.overwrite is not None else base.overwrite,
-        recursive=args.recursive if args.recursive is not None else base.recursive,
-        max_workers=args.workers if args.workers is not None else base.max_workers,
-        supported_formats=normalise_formats(args.formats) if args.formats is not None else base.supported_formats,
-    )
+    """Merge config.json values with CLI overrides (CLI overrides apply before validation)."""
+    overrides = {
+        "webp_quality": args.quality,
+        "lossless": args.lossless,
+        "method": args.method,
+        "delete_originals": args.delete_originals,
+        "overwrite": args.overwrite,
+        "recursive": args.recursive,
+        "max_workers": args.workers,
+        "supported_formats": args.formats,
+    }
+    return settings_from_config(config, overrides=overrides)
 
 
 def format_bytes(num_bytes: int) -> str:
@@ -122,13 +152,18 @@ def format_bytes(num_bytes: int) -> str:
 
 def run_cli(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-    setup_logging(log_file=args.log_file, verbose=args.verbose)
+    console = Console(stderr=True)
 
-    config = load_config(args.config)
+    log_err = setup_logging(log_file=args.log_file, verbose=args.verbose, console=console)
+    if log_err:
+        logging.error(log_err)
+        return EXIT_FATAL
+
     try:
+        config = load_config(args.config, strict=(args.config is not None))
         settings = build_settings(args, config)
     except ValueError as e:
-        logging.error(f"Invalid configuration value: {e}")
+        logging.error(f"Invalid configuration: {e}")
         return EXIT_FATAL
 
     mode = "lossless" if settings.lossless else f"quality={settings.quality}"
@@ -140,7 +175,15 @@ def run_cli(argv: Optional[List[str]] = None) -> int:
     else:
         logging.info("Original files will be kept after conversion")
 
-    folder_input = args.folder_path if args.folder_path else input("Enter the folder path containing images: ")
+    if args.folder_path is not None:
+        folder_input = args.folder_path
+    else:
+        try:
+            folder_input = input("Enter the folder path containing images: ")
+        except (EOFError, KeyboardInterrupt):
+            logging.error("No folder path provided.")
+            return EXIT_FATAL
+
     folder_path = validate_folder_path(folder_input)
     if not folder_path:
         return EXIT_FATAL
@@ -168,24 +211,35 @@ def run_cli(argv: Optional[List[str]] = None) -> int:
         logging.info("Files to be processed:")
         for src, dst in plan:
             logging.info(f"  {src} -> {os.path.basename(dst)}")
+        if skipped:
+            logging.info("Files skipped:")
+            for src in skipped:
+                logging.info(f"  {src}")
         logging.info("Dry run completed. No files were modified.")
-        return EXIT_OK
+        return EXIT_PARTIAL_FAILURE if skipped else EXIT_OK
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        transient=True,
-    ) as progress:
-        task_id = progress.add_task("Converting images", total=len(plan))
+    cancel_event = threading.Event()
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task_id = progress.add_task("Converting images", total=len(plan))
 
-        def on_event(ev: BatchEvent) -> None:
-            if ev.kind in ("file_completed", "file_failed"):
-                progress.advance(task_id, 1)
+            def on_event(ev: BatchEvent) -> None:
+                if ev.kind in ("file_completed", "file_failed"):
+                    progress.advance(task_id, 1)
 
-        summary = run_batch(settings, plan, skipped=skipped, on_event=on_event)
+            summary = run_batch(settings, plan, skipped=skipped, on_event=on_event, cancel_event=cancel_event)
+    except KeyboardInterrupt:
+        cancel_event.set()
+        logging.warning("Interrupted by user.")
+        return EXIT_PARTIAL_FAILURE
 
     saved = summary.saved_bytes
     pct = (100.0 * saved / summary.bytes_before) if summary.bytes_before else 0.0
@@ -194,4 +248,4 @@ def run_cli(argv: Optional[List[str]] = None) -> int:
         f"Done: {summary.succeeded} succeeded, {summary.failed} failed, {summary.skipped} skipped "
         f"({format_bytes(abs(saved))} {direction}, {abs(pct):.1f}%)."
     )
-    return EXIT_PARTIAL_FAILURE if (summary.failed or summary.skipped) else EXIT_OK
+    return EXIT_PARTIAL_FAILURE if (summary.failed or summary.skipped or summary.cancelled) else EXIT_OK
